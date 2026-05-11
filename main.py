@@ -12,52 +12,67 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 def get_research_daily():
     chrome_options = Options()
-    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless=new') # 최신 헤드리스 모드 사용
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    # 봇 감지 회피를 위한 위장 설정
+    chrome_options.add_argument('--window-size=1920,1080') # 화면 크기 고정
+    
+    # 봇 감지 우회를 위한 핵심 설정
     chrome_options.add_argument('--disable-blink-features=AutomationControlled')
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
 
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
+    # 실행 시 로봇 속성 제거 스크립트
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            })
+        """
+    })
+
     try:
-        # 1. 접속
+        print("퍼플렉시티 접속 시도...")
         driver.get("https://www.perplexity.ai")
         
-        # 2. 검색창이 나타날 때까지 최대 20초 대기 (핵심 수정 사항)
-        wait = WebDriverWait(driver, 20)
+        # 페이지가 완전히 로드될 때까지 충분히 대기
+        time.sleep(10)
+        
+        # 검색창 대기 및 찾기
+        wait = WebDriverWait(driver, 30)
         try:
-            # 여러 타입의 검색창 요소를 시도
-            search_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "textarea")))
-        except:
-            # 에러 발생 시 현재 화면 캡처 (GitHub Actions Artifacts에서 확인 가능)
-            driver.save_screenshot("debug_screen.png")
-            print("검색창을 찾을 수 없습니다. debug_screen.png 확인이 필요합니다.")
+            # tag_name 대신 더 구체적인 CSS 선택자 사용
+            search_box = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "textarea[placeholder*='Anything']")))
+            print("검색창 발견!")
+        except Exception as e:
+            print(f"검색창 찾기 실패: {e}")
+            driver.save_screenshot("error_capture.png") # 실패 시 화면 캡처
             return
 
-        # 3. 검색어 입력 (한 글자씩 타이핑하는 느낌으로)
+        # 타이핑 시뮬레이션
         query = "running, shoe, insole, midsole, outsole, walking, Footwear 관련 최신 논문 5개 요약해줘"
         search_box.send_keys(query)
         time.sleep(2)
         search_box.send_keys(Keys.ENTER)
 
-        # 4. 답변 생성 대기 (여유 있게 60초)
-        print("답변 생성 대기 중...")
+        print("답변 대기 중 (60초)...")
         time.sleep(60)
 
-        # 5. 결과 추출
-        results = driver.find_elements(By.CSS_SELECTOR, ".prose")
-        if results:
-            result_text = results[0].text
+        # 결과 추출
+        try:
+            # 답변 영역이 생성될 때까지 대기
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".prose")))
+            results = driver.find_elements(By.CSS_SELECTOR, ".prose")
+            result_text = results[-1].text # 가장 최근 답변 가져오기
             Path("today_research.md").write_text(result_text, encoding="utf-8")
-            print("저장 완료!")
-        else:
-            print("답변 텍스트 영역을 찾지 못했습니다.")
-            driver.save_screenshot("no_result_screen.png")
+            print("오늘의 논문 저장 완료!")
+        except:
+            print("답변을 찾을 수 없습니다.")
+            driver.save_screenshot("no_answer.png")
             
     finally:
         driver.quit()
